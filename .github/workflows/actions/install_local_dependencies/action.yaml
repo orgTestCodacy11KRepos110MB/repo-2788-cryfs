@@ -74,3 +74,24 @@ runs:
         echo Install boost
         ./bootstrap.sh --with-libraries=filesystem,system,thread,chrono,program_options
         sudo ./b2 link=shared cxxflags=-fPIC --prefix=/usr -d0 -j$NUMCORES install
+
+        echo Download googletest
+        wget -O googletest.tar.gz https://github.com/google/googletest/archive/273f8cb059a4e7b089731036392422b5ef489791.tar.gz
+        if [ $(sha512sum googletest.tar.gz | awk '{print $1;}') == "37794743868e1ece2ad11f8f8b57f90cf2e077778f59b04fe632b599df334ab31a998743c755d10c699959ee0185760d1b7995a33112f10b68f100140a30447e" ]; then
+          echo Correct sha512sum
+        else
+          echo Wrong sha512sum
+          sha512sum googletest.tar.gz
+          exit 1
+        fi
+        echo Extracting googletest
+        tar -xf googletest.tar.gz
+        rm googletest.tar.gz
+        cd googletest-273f8cb059a4e7b089731036392422b5ef489791
+
+        echo Install googletest
+        mkdir build
+        cd build
+        cmake ..
+        make -j$NUMCORES
+        sudo make install

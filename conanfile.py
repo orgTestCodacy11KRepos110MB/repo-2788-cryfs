@@ -7,6 +7,9 @@ class CryFSConan(ConanFile):
 		"spdlog/1.8.5",
 		"boost/1.75.0",
 	]
+	build_requires = [
+		"gtest/cci.20210126",
+	]
 	generators = "cmake"
 	default_options = {
 		"boost:system_no_deprecated": True,

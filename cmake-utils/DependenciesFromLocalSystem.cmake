@@ -59,3 +59,12 @@ find_package(spdlog REQUIRED)
 check_target_is_not_from_conan(spdlog::spdlog)
 add_library(CryfsDependencies_spdlog INTERFACE)
 target_link_libraries(CryfsDependencies_spdlog INTERFACE spdlog::spdlog)
+
+
+
+
+# Setup gtest dependency
+find_package(gtest)
+check_target_is_not_from_conan(GTest::Main)
+add_library(CryfsDependencies_gtest INTERFACE)
+target_link_libraries(CryfsDependencies_gtest INTERFACE GTest::Main)
