@@ -1,3 +1,8 @@
+// NOMINMAX works around an MSVC issue, see https://github.com/microsoft/cppwinrt/issues/479
+#if defined(_MSC_VER)
+#define NOMINMAX
+#endif
+
 #include "Fuse.h"
 #include <memory>
 #include <cassert>
@@ -14,8 +19,12 @@
 #include <codecvt>
 #include <boost/algorithm/string/replace.hpp>
 
+#include <range/v3/view/split.hpp>
+#include <range/v3/view/join.hpp>
+#include <range/v3/view/filter.hpp>
+#include <range/v3/range/conversion.hpp>
+
 #if defined(_MSC_VER)
-#include <codecvt>
 #include <dokan/dokan.h>
 #endif
 
@@ -266,7 +275,80 @@ void Fuse::_logUnknownException() {
   LOG(ERR, "Unknown exception thrown");
 }
 
-void Fuse::run(const bf::path &mountdir, const vector<string> &fuseOptions) {
+void Fuse::runInForeground(const bf::path &mountdir, vector<string> fuseOptions) {
+  vector<string> realFuseOptions = std::move(fuseOptions);
+  if (std::find(realFuseOptions.begin(), realFuseOptions.end(), "-f") == realFuseOptions.end()) {
+    realFuseOptions.push_back("-f");
+  }
+  _run(mountdir, std::move(realFuseOptions));
+}
+
+void Fuse::runInBackground(const bf::path &mountdir, vector<string> fuseOptions) {
+  vector<string> realFuseOptions = std::move(fuseOptions);
+  _removeAndWarnIfExists(&realFuseOptions, "-f");
+  _removeAndWarnIfExists(&realFuseOptions, "-d");
+  _run(mountdir, std::move(realFuseOptions));
+}
+
+void Fuse::_removeAndWarnIfExists(vector<string> *fuseOptions, const std::string &option) {
+  auto found = std::find(fuseOptions->begin(), fuseOptions->end(), option);
+  if (found != fuseOptions->end()) {
+    LOG(WARN, "The fuse option {} only works when running in foreground. Removing fuse option.", option);
+    do {
+      fuseOptions->erase(found);
+      found = std::find(fuseOptions->begin(), fuseOptions->end(), option);
+    } while (found != fuseOptions->end());
+  }
+}
+
+namespace {
+void extractAllAtimeOptionsAndRemoveOnesUnknownToLibfuse_(string* csv_options, vector<string>* result) {
+    const auto is_fuse_supported_atime_flag = [] (const std::string& flag) {
+        constexpr std::array<const char*, 2> flags = {"noatime", "atime"};
+        return flags.end() != std::find(flags.begin(), flags.end(), flag);
+    };
+    const auto is_fuse_unsupported_atime_flag = [] (const std::string& flag) {
+        constexpr std::array<const char*, 3> flags = {"strictatime", "relatime", "nodiratime"};
+        return flags.end() != std::find(flags.begin(), flags.end(), flag);
+    };
+    *csv_options = ranges::make_subrange(csv_options->begin(), csv_options->end())
+        | ranges::views::split(',')
+        | ranges::views::filter(
+            [&] (auto&& elem_) {
+                // TODO string_view would be better
+                std::string elem(&*elem_.begin(), ranges::distance(elem_));
+                if (is_fuse_unsupported_atime_flag(elem)) {
+                    result->push_back(elem);
+                    return false;
+                }
+                if (is_fuse_supported_atime_flag(elem)) {
+                    result->push_back(elem);
+                }
+                return true;
+            })
+        | ranges::views::join(',')
+        | ranges::to<string>();
+}
+
+// Return a list of all atime options (e.g. atime, noatime, relatime, strictatime, nodiratime) that occur in the
+// fuseOptions input. They must be preceded by a '-o', i.e. {..., '-o', 'noatime', ...} and multiple ones can be
+// csv-concatenated, i.e. {..., '-o', 'atime,nodiratime', ...}.
+// Also, this function removes all of these atime options that are unknown to libfuse (i.e. all except atime and noatime)
+// from the input fuseOptions so we can pass it on to libfuse without crashing.
+vector<string> extractAllAtimeOptionsAndRemoveOnesUnknownToLibfuse_(vector<string>* fuseOptions) {
+    vector<string> result;
+    bool lastOptionWasDashO = false;
+    for (string& option : *fuseOptions) {
+        if (lastOptionWasDashO) {
+            extractAllAtimeOptionsAndRemoveOnesUnknownToLibfuse_(&option, &result);
+        }
+        lastOptionWasDashO = (option == "-o");
+    }
+    return result;
+}
+}
+
+void Fuse::_run(const bf::path &mountdir, vector<string> fuseOptions) {
 #if defined(__GLIBC__)|| defined(__APPLE__) || defined(_MSC_VER)
   // Avoid encoding errors for non-utf8 characters, see https://github.com/cryfs/cryfs/issues/247
   // this is ifdef'd out for non-glibc linux, because musl doesn't handle this correctly.
@@ -277,9 +359,64 @@ void Fuse::run(const bf::path &mountdir, const vector<string> &fuseOptions) {
 
   ASSERT(_argv.size() == 0, "Filesystem already started");
 
+  vector<string> atimeOptions = extractAllAtimeOptionsAndRemoveOnesUnknownToLibfuse_(&fuseOptions);
+  _createContext(atimeOptions);
+
   _argv = _build_argv(mountdir, fuseOptions);
 
   fuse_main(_argv.size(), _argv.data(), operations(), this);
+}
+
+void Fuse::_createContext(const vector<string> &fuseOptions) {
+    const bool has_atime_flag = fuseOptions.end() != std::find(fuseOptions.begin(), fuseOptions.end(), "atime");
+    const bool has_noatime_flag = fuseOptions.end() != std::find(fuseOptions.begin(), fuseOptions.end(), "noatime");
+    const bool has_relatime_flag = fuseOptions.end() != std::find(fuseOptions.begin(), fuseOptions.end(), "relatime");
+    const bool has_strictatime_flag = fuseOptions.end() != std::find(fuseOptions.begin(), fuseOptions.end(), "strictatime");
+    const bool has_nodiratime_flag = fuseOptions.end() != std::find(fuseOptions.begin(), fuseOptions.end(), "nodiratime");
+
+    // Default is NOATIME, this reduces the probability for synchronization conflicts
+    _context = Context(noatime());
+
+    if (has_noatime_flag) {
+        ASSERT(!has_atime_flag, "Cannot have both, noatime and atime flags set.");
+        ASSERT(!has_relatime_flag, "Cannot have both, noatime and relatime flags set.");
+        ASSERT(!has_strictatime_flag, "Cannot have both, noatime and strictatime flags set.");
+        // note: can have nodiratime flag set but that is ignored because it is already included in the noatime policy.
+        _context->setTimestampUpdateBehavior(noatime());
+    } else if (has_relatime_flag) {
+        // note: can have atime and relatime both set, they're identical
+        ASSERT(!has_noatime_flag, "This shouldn't happen, or we would have hit a case above.");
+        ASSERT(!has_strictatime_flag, "Cannot have both, relatime and strictatime flags set.");
+        if (has_nodiratime_flag) {
+            _context->setTimestampUpdateBehavior(nodiratime_relatime());
+        } else {
+            _context->setTimestampUpdateBehavior(relatime());
+        }
+    } else if (has_atime_flag) {
+        // note: can have atime and relatime both set, they're identical
+        ASSERT(!has_noatime_flag, "This shouldn't happen, or we would have hit a case above");
+        ASSERT(!has_strictatime_flag, "Cannot have both, atime and strictatime flags set.");
+        if (has_nodiratime_flag) {
+            _context->setTimestampUpdateBehavior(nodiratime_relatime());
+        } else {
+            _context->setTimestampUpdateBehavior(relatime());
+        }
+    } else if (has_strictatime_flag) {
+        ASSERT(!has_noatime_flag, "This shouldn't happen, or we would have hit a case above");
+        ASSERT(!has_atime_flag, "This shouldn't happen, or we would have hit a case above");
+        ASSERT(!has_relatime_flag, "This shouldn't happen, or we would have hit a case above");
+        if (has_nodiratime_flag) {
+            _context->setTimestampUpdateBehavior(nodiratime_strictatime());
+        } else {
+            _context->setTimestampUpdateBehavior(strictatime());
+        }
+    } else if (has_nodiratime_flag) {
+        ASSERT(!has_noatime_flag, "This shouldn't happen, or we would have hit a case above");
+        ASSERT(!has_atime_flag, "This shouldn't happen, or we would have hit a case above");
+        ASSERT(!has_relatime_flag, "This shouldn't happen, or we would have hit a case above");
+        ASSERT(!has_strictatime_flag, "This shouldn't happen, or we would have hit a case above");
+        _context->setTimestampUpdateBehavior(noatime()); // use noatime by default
+    }
 }
 
 vector<char *> Fuse::_build_argv(const bf::path &mountdir, const vector<string> &fuseOptions) {
@@ -298,7 +435,7 @@ vector<char *> Fuse::_build_argv(const bf::path &mountdir, const vector<string> 
   // Make volume name default to mountdir on macOS
   _add_fuse_option_if_not_exists(&argv, "volname", mountdir.filename().string());
 #endif
-  // TODO Also set read/write size for osxfuse. The options there are called differently.
+  // TODO Also set read/write size for macFUSE. The options there are called differently.
   // large_read not necessary because reads are large anyhow. This option is only important for 2.4.
   //argv.push_back(_create_c_string("-o"));
   //argv.push_back(_create_c_string("large_read"));
@@ -1011,7 +1148,7 @@ int Fuse::readdir(const bf::path &path, void *buf, fuse_fill_dir_t filler, int64
     ASSERT(is_valid_fspp_path(path), "has to be an absolute path");
     auto entries = _fs->readDir(path);
     fspp::fuse::STAT stbuf{};
-    for (const auto &entry : *entries) {
+    for (const auto &entry : entries) {
       //We could pass more file metadata to filler() in its third parameter,
       //but it doesn't help performance since fuse ignores everything in stbuf
       //except for file-type bits in st_mode and (if used) st_ino.
@@ -1076,6 +1213,9 @@ void Fuse::init(fuse_conn_info *conn) {
   UNUSED(conn);
   ThreadNameForDebugging _threadName("init");
   _fs = _init(this);
+
+  ASSERT(_context != boost::none, "Context should have been initialized in Fuse::run() but somehow didn't");
+  _fs->setContext(fspp::Context { *_context });
 
   LOG(INFO, "Filesystem started.");
 
