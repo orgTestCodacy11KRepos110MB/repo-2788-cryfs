@@ -1,3 +1,8 @@
+Version 0.11.1 (unreleased)
+--------------
+Fixed bugs:
+* Get the range-v3 dependency from conan-center without the @ericniebler channel. Seems the old location of the dependency wasn't available anymore.
+
 Version 0.11.0
 ---------------
 Backwards Compatibility:
