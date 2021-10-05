@@ -8,6 +8,7 @@
 
 using namespace cpputils::logging;
 using std::string;
+using testing::MatchesRegex;
 
 TEST_F(LoggingTest, DefaultLoggerIsStderr) {
     string output = captureStderr([]{
@@ -24,8 +25,8 @@ TEST_F(LoggingTest, SetLogger_NewLoggerIsUsed) {
         LOG(INFO, "My log message");
     });
 	// For some reason, the following doesn't seem to work in MSVC. Possibly because of the multiline string?
-	//EXPECT_THAT(output, MatchesRegex(".*\\[MyTestLog2\\].*\\[info\\].*My log message.*"));
-	EXPECT_TRUE(std::regex_search(output, std::regex(".*\\[MyTestLog2\\].*\\[info\\].*My log message.*")));
+	EXPECT_THAT(output, MatchesRegex(".*\\[MyTestLog2\\].*\\[info\\].*My log message.*"));
+	//EXPECT_TRUE(std::regex_search(output, std::regex(".*\\[MyTestLog2\\].*\\[info\\].*My log message.*")));
 }
 
 TEST_F(LoggingTest, SetNonStderrLogger_LogsToNewLogger) {
