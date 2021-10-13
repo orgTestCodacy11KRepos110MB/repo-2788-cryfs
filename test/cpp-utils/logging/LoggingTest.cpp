@@ -40,9 +40,10 @@ TEST_F(LoggingTest, SetLogger_NewLoggerIsUsed) {
 TEST_F(LoggingTest, SetNonStderrLogger_LogsToNewLogger) {
     setLogger(mockLogger.get());
     logger()->info("My log message");
+	string output = mockLogger.capturedLog();
 	// For some reason, the following doesn't seem to work in MSVC. Possibly because of the multiline string?
 	//EXPECT_THAT(output, MatchesRegex(".*\\[MockLogger\\].*\\[info\\].*My log message.*"));
-	if(!std::regex_search(mockLogger.capturedLog(), std::regex(".*\\[MockLogger\\].*\\[info\\].*My log message.*"))) {
+	if(!std::regex_search(output, std::regex(".*\\[MockLogger\\].*\\[info\\].*My log message.*"))) {
 		EXPECT_THAT(output, MatchesRegex(".*\\[MockLogger\\].*\\[info\\].*My log message.*"));
 		EXPECT_TRUE(false);
 	}
