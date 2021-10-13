@@ -16,7 +16,10 @@ TEST_F(LoggingTest, DefaultLoggerIsStderr) {
     });
 	// For some reason, the following doesn't seem to work in MSVC. Possibly because of the multiline string?
         //EXPECT_THAT(output, MatchesRegex(".*\\[Log\\].*\\[info\\].*My log message.*"));
-	EXPECT_TRUE(std::regex_search(output, std::regex(".*\\[Log\\].*\\[info\\].*My log message.*")));
+	if(!std::regex_search(output, std::regex(".*\\[Log\\].*\\[info\\].*My log message.*"))) {
+	    EXPECT_THAT(output, MatchesRegex(".*\\[Log\\].*\\[info\\].*My log message.*"));
+	    EXPECT_TRUE(false);
+	}
 }
 
 TEST_F(LoggingTest, SetLogger_NewLoggerIsUsed) {
@@ -28,7 +31,10 @@ TEST_F(LoggingTest, SetLogger_NewLoggerIsUsed) {
     });
 	// For some reason, the following doesn't seem to work in MSVC. Possibly because of the multiline string?
 	//EXPECT_THAT(output, MatchesRegex(".*\\[MyTestLog2\\].*\\[info\\].*My log message.*"));
-	EXPECT_TRUE(std::regex_search(output, std::regex(".*\\[MyTestLog2\\].*\\[info\\].*My log message.*")));
+	if(!std::regex_search(output, std::regex(".*\\[MyTestLog2\\].*\\[info\\].*My log message.*"))) {
+            EXPECT_THAT(output, MatchesRegex(".*\\[MyTestLog2\\].*\\[info\\].*My log message.*"));
+	    EXPECT_TRUE(false);
+	}
 }
 
 TEST_F(LoggingTest, SetNonStderrLogger_LogsToNewLogger) {
@@ -36,7 +42,10 @@ TEST_F(LoggingTest, SetNonStderrLogger_LogsToNewLogger) {
     logger()->info("My log message");
 	// For some reason, the following doesn't seem to work in MSVC. Possibly because of the multiline string?
 	//EXPECT_THAT(output, MatchesRegex(".*\\[MockLogger\\].*\\[info\\].*My log message.*"));
-	EXPECT_TRUE(std::regex_search(mockLogger.capturedLog(), std::regex(".*\\[MockLogger\\].*\\[info\\].*My log message.*")));
+	if(!std::regex_search(mockLogger.capturedLog(), std::regex(".*\\[MockLogger\\].*\\[info\\].*My log message.*"))) {
+		EXPECT_THAT(output, MatchesRegex(".*\\[MockLogger\\].*\\[info\\].*My log message.*"));
+		EXPECT_TRUE(false);
+	}
 }
 
 TEST_F(LoggingTest, SetNonStderrLogger_DoesNotLogToStderr) {
@@ -52,7 +61,10 @@ TEST_F(LoggingTest, InfoLog) {
     LOG(INFO, "My log message");
 	// For some reason, the following doesn't seem to work in MSVC. Possibly because of the multiline string?
 	//EXPECT_THAT(mockLogger.capturedLog(), MatchesRegex(".*\\[MockLogger\\].*\\[info\\].*My log message.*"));
-	EXPECT_TRUE(std::regex_search(mockLogger.capturedLog(), std::regex(".*\\[MockLogger\\].*\\[info\\].*My log message.*")));
+	if(!std::regex_search(mockLogger.capturedLog(), std::regex(".*\\[MockLogger\\].*\\[info\\].*My log message.*"))) {
+		EXPECT_THAT(mockLogger.capturedLog(), MatchesRegex(".*\\[MockLogger\\].*\\[info\\].*My log message.*"));
+		EXPECT_TRUE(false);
+	}
 }
 
 TEST_F(LoggingTest, WarningLog) {
@@ -60,7 +72,10 @@ TEST_F(LoggingTest, WarningLog) {
     LOG(WARN, "My log message");
 	// For some reason, the following doesn't seem to work in MSVC. Possibly because of the multiline string?
 	//EXPECT_THAT(mockLogger.capturedLog(), MatchesRegex(".*\\[MockLogger\\].*\\[warning\\].*My log message.*"));
-	EXPECT_TRUE(std::regex_search(mockLogger.capturedLog(), std::regex(".*\\[MockLogger\\].*\\[warning\\].*My log message.*")));
+	if(!std::regex_search(mockLogger.capturedLog(), std::regex(".*\\[MockLogger\\].*\\[warning\\].*My log message.*"))) {
+		EXPECT_THAT(mockLogger.capturedLog(), MatchesRegex(".*\\[MockLogger\\].*\\[warning\\].*My log message.*"));
+		EXPECT_TRUE(false);
+	}
 }
 
 TEST_F(LoggingTest, DebugLog) {
@@ -69,7 +84,10 @@ TEST_F(LoggingTest, DebugLog) {
     LOG(DEBUG, "My log message");
 	// For some reason, the following doesn't seem to work in MSVC. Possibly because of the multiline string?
 	//EXPECT_THAT(mockLogger.capturedLog(), MatchesRegex(".*\\[MockLogger\\].*\\[debug\\].*My log message.*"));
-	EXPECT_TRUE(std::regex_search(mockLogger.capturedLog(), std::regex(".*\\[MockLogger\\].*\\[debug\\].*My log message.*")));
+	if(!std::regex_search(mockLogger.capturedLog(), std::regex(".*\\[MockLogger\\].*\\[debug\\].*My log message.*"))) {
+		EXPECT_THAT(mockLogger.capturedLog(), MatchesRegex(".*\\[MockLogger\\].*\\[debug\\].*My log message.*"));
+		EXPECT_TRUE(false);
+	}
 }
 
 TEST_F(LoggingTest, ErrorLog) {
@@ -77,7 +95,10 @@ TEST_F(LoggingTest, ErrorLog) {
     LOG(ERR, "My log message");
 	// For some reason, the following doesn't seem to work in MSVC. Possibly because of the multiline string?
 	//EXPECT_THAT(mockLogger.capturedLog(), MatchesRegex(".*\\[MockLogger\\].*\\[error\\].*My log message.*"));
-	EXPECT_TRUE(std::regex_search(mockLogger.capturedLog(), std::regex(".*\\[MockLogger\\].*\\[error\\].*My log message.*")));
+	if(!std::regex_search(mockLogger.capturedLog(), std::regex(".*\\[MockLogger\\].*\\[error\\].*My log message.*"))) {
+		EXPECT_THAT(mockLogger.capturedLog(), MatchesRegex(".*\\[MockLogger\\].*\\[error\\].*My log message.*"));
+		EXPECT_TRUE(false);
+	}
 }
 
 void logAndExit(const string &message) {
@@ -101,7 +122,10 @@ TEST_F(LoggingTest, MessageIsConstChar) {
     LOG(INFO, "My log message");
 	// For some reason, the following doesn't seem to work in MSVC. Possibly because of the multiline string?
 	//EXPECT_THAT(mockLogger.capturedLog(), MatchesRegex(".*\\[MockLogger\\].*\\[info\\].*My log message.*"));
-	EXPECT_TRUE(std::regex_search(mockLogger.capturedLog(), std::regex(".*\\[MockLogger\\].*\\[info\\].*My log message.*")));
+	if(!std::regex_search(mockLogger.capturedLog(), std::regex(".*\\[MockLogger\\].*\\[info\\].*My log message.*"))) {
+		EXPECT_THAT(mockLogger.capturedLog(), MatchesRegex(".*\\[MockLogger\\].*\\[info\\].*My log message.*"));
+		EXPECT_TRUE(false);
+	}
 }
 
 TEST_F(LoggingTest, MessageIsString) {
@@ -110,7 +134,10 @@ TEST_F(LoggingTest, MessageIsString) {
     LOG(INFO, msg);
 	// For some reason, the following doesn't seem to work in MSVC. Possibly because of the multiline string?
 	//EXPECT_THAT(mockLogger.capturedLog(), MatchesRegex(".*\\[MockLogger\\].*\\[info\\].*My log message.*"));
-	EXPECT_TRUE(std::regex_search(mockLogger.capturedLog(), std::regex(".*\\[MockLogger\\].*\\[info\\].*My log message.*")));
+	if(!std::regex_search(mockLogger.capturedLog(), std::regex(".*\\[MockLogger\\].*\\[info\\].*My log message.*"))) {
+		EXPECT_THAT(mockLogger.capturedLog(), MatchesRegex(".*\\[MockLogger\\].*\\[info\\].*My log message.*"));
+		EXPECT_TRUE(false);
+	}
 }
 
 TEST_F(LoggingTest, FormatWithStringPlaceholder) {
@@ -119,7 +146,10 @@ TEST_F(LoggingTest, FormatWithStringPlaceholder) {
     LOG(INFO, "My log message: {}", str);
 	// For some reason, the following doesn't seem to work in MSVC. Possibly because of the multiline string?
 	//EXPECT_THAT(mockLogger.capturedLog(), MatchesRegex(".*\\[MockLogger\\].*\\[info\\].*My log message: placeholder.*"));
-	EXPECT_TRUE(std::regex_search(mockLogger.capturedLog(), std::regex(".*\\[MockLogger\\].*\\[info\\].*My log message: placeholder.*")));
+	if(!std::regex_search(mockLogger.capturedLog(), std::regex(".*\\[MockLogger\\].*\\[info\\].*My log message: placeholder.*"))) {
+		EXPECT_THAT(mockLogger.capturedLog(), MatchesRegex(".*\\[MockLogger\\].*\\[info\\].*My log message: placeholder.*"));
+		EXPECT_TRUE(false);
+	}
 }
 
 TEST_F(LoggingTest, FormatWithConstCharPlaceholder) {
@@ -127,7 +157,10 @@ TEST_F(LoggingTest, FormatWithConstCharPlaceholder) {
     LOG(INFO, "My log message: {}", "placeholder");
 	// For some reason, the following doesn't seem to work in MSVC. Possibly because of the multiline string?
 	//EXPECT_THAT(mockLogger.capturedLog(), MatchesRegex(".*\\[MockLogger\\].*\\[info\\].*My log message: placeholder.*"));
-	EXPECT_TRUE(std::regex_search(mockLogger.capturedLog(), std::regex(".*\\[MockLogger\\].*\\[info\\].*My log message: placeholder.*")));
+	if(!std::regex_search(mockLogger.capturedLog(), std::regex(".*\\[MockLogger\\].*\\[info\\].*My log message: placeholder.*"))) {
+		EXPECT_THAT(mockLogger.capturedLog(), MatchesRegex(".*\\[MockLogger\\].*\\[info\\].*My log message: placeholder.*"));
+		EXPECT_TRUE(false);
+	}
 }
 
 TEST_F(LoggingTest, FormatWithIntPlaceholder) {
@@ -135,7 +168,10 @@ TEST_F(LoggingTest, FormatWithIntPlaceholder) {
     LOG(INFO, "My log message: {}", 4);
 	// For some reason, the following doesn't seem to work in MSVC. Possibly because of the multiline string?
 	//EXPECT_THAT(mockLogger.capturedLog(), MatchesRegex(".*\\[MockLogger\\].*\\[info\\].*My log message: 4.*"));
-	EXPECT_TRUE(std::regex_search(mockLogger.capturedLog(), std::regex(".*\\[MockLogger\\].*\\[info\\].*My log message: 4.*")));
+	if(!std::regex_search(mockLogger.capturedLog(), std::regex(".*\\[MockLogger\\].*\\[info\\].*My log message: 4.*"))) {
+		EXPECT_THAT(mockLogger.capturedLog(), MatchesRegex(".*\\[MockLogger\\].*\\[info\\].*My log message: 4.*"));
+		EXPECT_TRUE(false);
+	}
 }
 
 TEST_F(LoggingTest, FormatWithMultiplePlaceholders) {
@@ -143,5 +179,8 @@ TEST_F(LoggingTest, FormatWithMultiplePlaceholders) {
     LOG(INFO, "My log message: {}, {}, {}", 4, "then", true);
 	// For some reason, the following doesn't seem to work in MSVC. Possibly because of the multiline string?
 	//EXPECT_THAT(mockLogger.capturedLog(), MatchesRegex(".*\\[MockLogger\\].*\\[info\\].*My log message: 4, then, true.*"));
-	EXPECT_TRUE(std::regex_search(mockLogger.capturedLog(), std::regex(".*\\[MockLogger\\].*\\[info\\].*My log message: 4, then, true.*")));
+	if(!std::regex_search(mockLogger.capturedLog(), std::regex(".*\\[MockLogger\\].*\\[info\\].*My log message: 4, then, true.*"))) {
+		EXPECT_THAT(mockLogger.capturedLog(), MatchesRegex(".*\\[MockLogger\\].*\\[info\\].*My log message: 4, then, true.*"));
+		EXPECT_TRUE(false);
+	}
 }
