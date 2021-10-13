@@ -22,7 +22,9 @@ TEST_F(LoggingTest, DefaultLoggerIsStderr) {
 TEST_F(LoggingTest, SetLogger_NewLoggerIsUsed) {
     setLogger(spdlog::stderr_logger_mt("MyTestLog2"));
     string output = captureStderr([]{
+        std::cerr << "BLA" << std::endl;
         LOG(INFO, "My log message");
+        std::cerr << "BLUB" << std::endl;
     });
 	// For some reason, the following doesn't seem to work in MSVC. Possibly because of the multiline string?
 	EXPECT_THAT(output, MatchesRegex(".*\\[MyTestLog2\\].*\\[info\\].*My log message.*"));
