@@ -11,6 +11,7 @@ using std::string;
 using testing::MatchesRegex;
 
 TEST_F(LoggingTest, DefaultLoggerIsStderr) {
+    LOG(INFO, "Test");
     string output = captureStderr([]{
         LOG(INFO, "My log message");
     });
