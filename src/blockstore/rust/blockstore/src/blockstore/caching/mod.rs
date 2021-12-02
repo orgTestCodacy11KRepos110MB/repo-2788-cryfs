@@ -1,25 +1,29 @@
-use std::collections::HashSet;
-use std::sync::{Mutex, Arc};
-use tokio::sync::{Mutex as AsyncMutex};
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use async_trait::async_trait;
 use futures::stream::Stream;
-use std::num::NonZeroUsize;
-use std::future::Future;
-use std::pin::Pin;
 use futures::StreamExt;
 use log::debug;
+use std::collections::HashSet;
+use std::future::Future;
+use std::num::NonZeroUsize;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
+use tokio::sync::Mutex as AsyncMutex;
 
 // TODO Can I remove the underlying : OptimizedBlockStoreWriter requirement from the read methods? It's currently needed because the cache needs it for writing back dirty blocks,
 // but in theory, dirty blocks shouldn't exist if we are read only.
 
 // TODO Think through concurrency here. Is everything we want concurrent actually concurrent or do we lock too many mutexes? Are there race conditions left?
 
-use super::{BlockId, BlockStore, block_data::IBlockData, BlockStoreDeleter, BlockStoreReader, OptimizedBlockStoreWriter};
+use super::{
+    block_data::IBlockData, BlockId, BlockStore, BlockStoreDeleter, BlockStoreReader,
+    OptimizedBlockStoreWriter,
+};
 
 use crate::data::Data;
 
 mod cache;
+mod lockpool;
 use cache::{Cache, EvictionCallback, LRUCache};
 
 const MAX_NUM_CACHE_ENTRIES: NonZeroUsize = unsafe {
@@ -37,20 +41,28 @@ struct CachingBlockStoreImpl<B: OptimizedBlockStoreWriter + Send + Sync> {
     cache: LRUCache<BlockId, CachedBlock<B::BlockData>, EvictionHandler<B>>,
 }
 
-impl <B: BlockStoreReader + OptimizedBlockStoreWriter + Send + Sync> CachingBlockStoreImpl<B> {
-    async fn load_from_cache_or_base_store(&mut self, block_id: &BlockId) -> Result<Option<CachedBlock<B::BlockData>>> {
+impl<B: BlockStoreReader + OptimizedBlockStoreWriter + Send + Sync> CachingBlockStoreImpl<B> {
+    async fn load_from_cache_or_base_store(
+        &mut self,
+        block_id: &BlockId,
+    ) -> Result<Option<CachedBlock<B::BlockData>>> {
         let loaded = if let Some(cached_block) = self.cache.pop(block_id) {
             debug!("Loaded {:?} from cache", block_id);
             Some(cached_block)
         } else {
             // TODO This is a bottleneck for concurrency since we're going to the basestore while we have a lock
-            let loaded = self.store_impl_impl.underlying_block_store.load(block_id).await?.map(|loaded| {
-                CachedBlock {
-                    // TODO This assumes that what was returned from underlying_block_store.load() has enough prefix bytes so that we can stuff it back into OptimizedBlockStoreWriter. Not sure if all block stores fulfill this, we may violate the BlockData invariant here.
-                    data: B::BlockData::new(loaded),
-                    dirty: false,
-                }
-            });
+            let loaded = self
+                .store_impl_impl
+                .underlying_block_store
+                .load(block_id)
+                .await?
+                .map(|loaded| {
+                    CachedBlock {
+                        // TODO This assumes that what was returned from underlying_block_store.load() has enough prefix bytes so that we can stuff it back into OptimizedBlockStoreWriter. Not sure if all block stores fulfill this, we may violate the BlockData invariant here.
+                        data: B::BlockData::new(loaded),
+                        dirty: false,
+                    }
+                });
             if loaded.is_some() {
                 debug!("Loaded {:?} from base store", block_id);
             } else {
@@ -71,13 +83,26 @@ struct EvictionHandler<B: OptimizedBlockStoreWriter> {
 }
 
 #[async_trait]
-impl <B: OptimizedBlockStoreWriter + Send + Sync> EvictionCallback<BlockId, CachedBlock<B::BlockData>> for EvictionHandler<B> {
-    async fn on_evict(&self, block_id: BlockId, cached_block: CachedBlock<B::BlockData>) -> Result<()> {
+impl<B: OptimizedBlockStoreWriter + Send + Sync>
+    EvictionCallback<BlockId, CachedBlock<B::BlockData>> for EvictionHandler<B>
+{
+    async fn on_evict(
+        &self,
+        block_id: BlockId,
+        cached_block: CachedBlock<B::BlockData>,
+    ) -> Result<()> {
         if cached_block.dirty {
-            self.store_impl_impl.underlying_block_store.store_optimized(&block_id, cached_block.data).await?;
+            self.store_impl_impl
+                .underlying_block_store
+                .store_optimized(&block_id, cached_block.data)
+                .await?;
 
             // remove it from the list of blocks not in the base store, if it's on it
-            self.store_impl_impl.cached_blocks_not_in_base_store.lock().unwrap().remove(&block_id);
+            self.store_impl_impl
+                .cached_blocks_not_in_base_store
+                .lock()
+                .unwrap()
+                .remove(&block_id);
         }
         Ok(())
     }
@@ -95,14 +120,17 @@ impl<B: OptimizedBlockStoreWriter + Send + Sync> CachingBlockStore<B> {
             cached_blocks_not_in_base_store: Mutex::new(HashSet::new()),
         });
         let store_impl_impl_rcclone = Arc::clone(&store_impl_impl);
-        let cache = LRUCache::new(MAX_NUM_CACHE_ENTRIES, EvictionHandler {store_impl_impl: store_impl_impl_rcclone});
+        let cache = LRUCache::new(
+            MAX_NUM_CACHE_ENTRIES,
+            EvictionHandler {
+                store_impl_impl: store_impl_impl_rcclone,
+            },
+        );
         let store_impl = AsyncMutex::new(CachingBlockStoreImpl {
             store_impl_impl,
             cache,
         });
-        Self {
-            store_impl
-        }
+        Self { store_impl }
     }
 }
 
@@ -127,30 +155,58 @@ impl<B: BlockStoreReader + OptimizedBlockStoreWriter + Send + Sync> BlockStoreRe
 
     async fn num_blocks(&self) -> Result<u64> {
         let store_impl = self.store_impl.lock().await;
-        let underlying_num_blocks = store_impl.store_impl_impl.underlying_block_store.num_blocks().await?;
-        let num_blocks_not_in_base_store = store_impl.store_impl_impl.cached_blocks_not_in_base_store.lock().unwrap().len() as u64;
+        let underlying_num_blocks = store_impl
+            .store_impl_impl
+            .underlying_block_store
+            .num_blocks()
+            .await?;
+        let num_blocks_not_in_base_store = store_impl
+            .store_impl_impl
+            .cached_blocks_not_in_base_store
+            .lock()
+            .unwrap()
+            .len() as u64;
         Ok(underlying_num_blocks + num_blocks_not_in_base_store)
     }
 
     fn estimate_num_free_bytes(&self) -> Result<u64> {
         // TODO Should we make estimate_num_free_bytes async instead of using block_on here? Or is there a way to avoid the lock or use a sync mutex?
         let store_impl = tokio::runtime::Handle::current().block_on(self.store_impl.lock());
-        store_impl.store_impl_impl.underlying_block_store.estimate_num_free_bytes()
+        store_impl
+            .store_impl_impl
+            .underlying_block_store
+            .estimate_num_free_bytes()
     }
 
     fn block_size_from_physical_block_size(&self, block_size: u64) -> Result<u64> {
         // TODO Should we make estimate_num_free_bytes async instead of using block_on here? Or is there a way to avoid the lock or use a sync mutex?
         let store_impl = tokio::runtime::Handle::current().block_on(self.store_impl.lock());
-        store_impl.store_impl_impl.underlying_block_store.block_size_from_physical_block_size(block_size)
+        store_impl
+            .store_impl_impl
+            .underlying_block_store
+            .block_size_from_physical_block_size(block_size)
     }
 
     async fn all_blocks(&self) -> Result<Pin<Box<dyn Stream<Item = Result<BlockId>> + Send>>> {
         let store_impl = self.store_impl.lock().await;
-        let cached_blocks_not_in_base_store: Vec<Result<BlockId>> = store_impl.store_impl_impl.cached_blocks_not_in_base_store.lock().unwrap().iter().cloned().map(Ok).collect();
-        let cached_blocks_in_base_store = store_impl.store_impl_impl.underlying_block_store.all_blocks().await?;
-        Ok(Box::pin(futures::stream::iter(cached_blocks_not_in_base_store).chain(
-            cached_blocks_in_base_store
-        )))
+        let cached_blocks_not_in_base_store: Vec<Result<BlockId>> = store_impl
+            .store_impl_impl
+            .cached_blocks_not_in_base_store
+            .lock()
+            .unwrap()
+            .iter()
+            .cloned()
+            .map(Ok)
+            .collect();
+        let cached_blocks_in_base_store = store_impl
+            .store_impl_impl
+            .underlying_block_store
+            .all_blocks()
+            .await?;
+        Ok(Box::pin(
+            futures::stream::iter(cached_blocks_not_in_base_store)
+                .chain(cached_blocks_in_base_store),
+        ))
     }
 }
 
@@ -163,24 +219,37 @@ impl<B: BlockStoreDeleter + OptimizedBlockStoreWriter + Send + Sync> BlockStoreD
         let mut store_impl = self.store_impl.lock().await;
         match store_impl.cache.pop(block_id) {
             Some(_cached_block) => {
-                let block_should_not_exist_in_base_store = store_impl.store_impl_impl.cached_blocks_not_in_base_store.lock().unwrap().remove(&block_id);
+                let block_should_not_exist_in_base_store = store_impl
+                    .store_impl_impl
+                    .cached_blocks_not_in_base_store
+                    .lock()
+                    .unwrap()
+                    .remove(&block_id);
                 let block_should_exist_in_base_store = !block_should_not_exist_in_base_store;
                 if block_should_exist_in_base_store {
-                    let block_did_exist_in_base_store = store_impl.store_impl_impl.underlying_block_store.remove(block_id).await?;
+                    let block_did_exist_in_base_store = store_impl
+                        .store_impl_impl
+                        .underlying_block_store
+                        .remove(block_id)
+                        .await?;
                     ensure!(block_did_exist_in_base_store, "Tried to remove block {:?}. Block existed in cache and stated it exists in base store, but wasn't found there.", block_id);
                 }
                 Ok(true)
             }
             None => {
-                store_impl.store_impl_impl.underlying_block_store.remove(block_id).await
+                store_impl
+                    .store_impl_impl
+                    .underlying_block_store
+                    .remove(block_id)
+                    .await
             }
         }
     }
 }
 
 #[async_trait]
-impl<B: OptimizedBlockStoreWriter + Send + Sync>
-    OptimizedBlockStoreWriter for CachingBlockStore<B>
+impl<B: OptimizedBlockStoreWriter + Send + Sync> OptimizedBlockStoreWriter
+    for CachingBlockStore<B>
 {
     type BlockData = B::BlockData;
 
@@ -188,7 +257,11 @@ impl<B: OptimizedBlockStoreWriter + Send + Sync>
         B::allocate(size)
     }
 
-    async fn try_create_optimized(&self, block_id: &BlockId, data: Self::BlockData) -> Result<bool> {
+    async fn try_create_optimized(
+        &self,
+        block_id: &BlockId,
+        data: Self::BlockData,
+    ) -> Result<bool> {
         let mut store_impl = self.store_impl.lock().await;
         // TODO Check if block exists in base store? Performance hit? It's very unlikely it exists.
         if let Some(cached_block) = store_impl.cache.pop(block_id) {
@@ -196,11 +269,19 @@ impl<B: OptimizedBlockStoreWriter + Send + Sync>
             store_impl.cache.push(*block_id, cached_block).expect("Failed to re-add an element that we just popped from the cache. This should always succeed.");
             Ok(false)
         } else {
-            store_impl.cache.push(*block_id, CachedBlock {
-                data: data.clone(),
-                dirty: true,
-            })?;
-            store_impl.store_impl_impl.cached_blocks_not_in_base_store.lock().unwrap().insert(*block_id);
+            store_impl.cache.push(
+                *block_id,
+                CachedBlock {
+                    data: data.clone(),
+                    dirty: true,
+                },
+            )?;
+            store_impl
+                .store_impl_impl
+                .cached_blocks_not_in_base_store
+                .lock()
+                .unwrap()
+                .insert(*block_id);
             Ok(true)
         }
     }
@@ -209,30 +290,24 @@ impl<B: OptimizedBlockStoreWriter + Send + Sync>
         debug!("Store {:?}", block_id);
         let mut store_impl = self.store_impl.lock().await;
         let new_cached_block = if let Some(_old_cached_block) = store_impl.cache.pop(block_id) {
-            CachedBlock {
-                data,
-                dirty: true,
-            }
+            CachedBlock { data, dirty: true }
         } else {
             // Make sure that the block exists in the underlying store
             // TODO Instead of storing it to the base store, we could just keep it dirty in the cache
             //      and (if it doesn't exist in base store yet) add it to _cachedBlocksNotInBaseStore
             // TODO This is a bottleneck for concurrency since we're going to the basestore while we have a lock
             let data_clone = data.clone();
-            store_impl.store_impl_impl.underlying_block_store.store_optimized(block_id, data_clone).await?;
+            store_impl
+                .store_impl_impl
+                .underlying_block_store
+                .store_optimized(block_id, data_clone)
+                .await?;
 
-            CachedBlock {
-                data,
-                dirty: false,
-            }
+            CachedBlock { data, dirty: false }
         };
         store_impl.cache.push(*block_id, new_cached_block)?;
         Ok(())
     }
 }
 
-impl<
-        B: BlockStore + OptimizedBlockStoreWriter + Send + Sync,
-    > BlockStore for CachingBlockStore<B>
-{
-}
+impl<B: BlockStore + OptimizedBlockStoreWriter + Send + Sync> BlockStore for CachingBlockStore<B> {}
