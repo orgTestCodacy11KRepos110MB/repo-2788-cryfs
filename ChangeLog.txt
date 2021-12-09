@@ -2,6 +2,10 @@ Version 0.12.0 (unreleased)
 ---------------
 * Updated to DokanY 1.3.0.1000
 
+Other:
+* Updated to spdlog 1.9.2
+
+
 Version 0.11.1 (unreleased)
 ---------------
 Bugfix:
@@ -9,6 +13,7 @@ Bugfix:
 * Update to CryptoPP 8.6. This fixes a rare bug where CryptoPP 8.5 encrypts data wrongly, see https://github.com/weidai11/cryptopp/issues/1069
 * cryfs-unmount correctly unmounts paths that contain spaces, see https://github.com/cryfs/cryfs/issues/372
 * Updated to DokanY 1.2.2.1001
+
 
 Version 0.11.0
 ---------------
